@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Reward Vault</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{--bg:#001a15;--card:#032b24;--card2:#00231d;--gold:#e4c65a;--green:#12c994;--text:#f5faf7;--muted:#8da7a1;--line:#31584e}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:#00110d;color:var(--text);font-family:Arial,Helvetica,sans-serif}
+body{min-height:100vh}.app{max-width:540px;margin:auto;padding:14px 14px 96px}
+.user{display:flex;align-items:center;gap:12px;padding:13px;border:1px solid var(--line);border-radius:27px;background:#062f28}
+.avatar{width:53px;height:53px;border:2px solid #806d2a;border-radius:50%;background:#18352f;display:grid;place-items:center;overflow:hidden;font-weight:900}.avatar img{width:100%;height:100%;object-fit:cover}
+.userinfo{flex:1;min-width:0}.name{font-size:18px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sub{margin-top:4px;color:var(--gold);font-size:10px;font-weight:800;letter-spacing:.7px}
+.badge{border:1px solid #6b5c24;border-radius:17px;padding:9px 11px;color:var(--gold);font-size:11px;font-weight:900;white-space:nowrap}
+.page{display:none}.page.active{display:block}
+.hero{margin-top:17px;min-height:275px;border:2px solid var(--gold);border-radius:35px;background:radial-gradient(circle,#084238 0,#002a22 57%,#001e18 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:25px}
+.icon{font-size:56px}.title{margin-top:8px;font-size:35px;font-weight:1000}.hero p{margin:10px 18px 0;color:var(--muted);line-height:1.5}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-top:15px}.stat{padding:22px 8px;text-align:center;border:2px solid var(--gold);border-radius:24px;background:var(--card)}.stat small{color:var(--gold);font-size:10px;font-weight:900;letter-spacing:1px}.num{margin-top:8px;font-size:37px;font-weight:1000}.green{color:var(--green)}
+.section{margin-top:16px;padding:19px;border:1px solid var(--line);border-radius:26px;background:var(--card)}.section h3{margin:0;color:var(--gold);font-size:15px;letter-spacing:.6px}
+.activity{display:grid;gap:9px;margin-top:14px}.activity-item{display:flex;align-items:center;gap:10px;padding:12px;border-radius:18px;background:var(--card2);border:1px solid #17473d}.miniavatar{width:39px;height:39px;border-radius:50%;display:grid;place-items:center;background:#183b33;border:1px solid #675b2a;color:var(--gold);font-weight:900}.activity-main{flex:1;font-size:13px}.activity-main small{color:var(--muted)}.time{color:var(--green);font-size:10px}
+.milestone{margin-top:17px;padding:20px;text-align:center;border:2px dashed var(--gold);border-radius:22px}.milestone small{color:var(--gold);font-weight:900;letter-spacing:1px}.progress{margin-top:7px;font-size:35px;font-weight:1000}.desc{text-align:center;color:var(--muted);line-height:1.55}
+button{font:inherit;cursor:pointer}.primary{width:100%;min-height:50px;border:0;border-radius:17px;background:linear-gradient(135deg,#15c995,#087b60);color:#fff;font-weight:900}.primary:disabled{background:#193b33;color:#72847e}
+.ref{margin-top:16px;padding:15px;border:1px solid #244e44;border-radius:18px;background:var(--card2);color:var(--gold);word-break:break-all;line-height:1.5}.copy{width:100%;margin-top:9px;padding:13px;border-radius:16px;border:1px solid var(--gold);background:#073d32;color:#fff;font-weight:900}
+.empty{text-align:center;color:var(--muted);padding:35px 8px;line-height:1.6}
+.bottom{position:fixed;z-index:50;bottom:8px;left:50%;transform:translateX(-50%);width:min(510px,calc(100% - 22px));display:grid;grid-template-columns:repeat(4,1fr);padding:7px;border:2px solid var(--gold);border-radius:28px;background:#00251f}.nav{border:0;background:none;color:#899f9a;padding:8px 2px;font-size:10px;font-weight:900}.nav.active{color:var(--gold)}.nav span{display:block;font-size:20px;margin-bottom:3px}
+.lock{min-height:calc(100vh - 30px);display:flex;flex-direction:column;justify-content:center}.lockbox{padding:25px 18px;border:2px solid var(--gold);border-radius:31px;background:var(--card);text-align:center}.lockbox h1{margin:0 0 8px;font-size:28px}.lockbox p{color:var(--muted);line-height:1.55}.channel{display:flex;align-items:center;gap:9px;padding:12px;margin-top:9px;border-radius:16px;background:var(--card2);border:1px solid var(--line)}.channel b{flex:1;text-align:left;font-size:13px}.join{border:0;border-radius:10px;padding:9px 12px;background:var(--gold);color:#14241f;font-weight:900}.verify{width:100%;margin-top:13px;padding:14px;border-radius:16px;border:2px solid var(--gold);background:#073d32;color:#fff;font-weight:900}.status{margin-top:11px;font-weight:800;font-size:13px}
+@media(max-width:370px){.app{padding-left:10px;padding-right:10px}.title{font-size:30px}.badge{font-size:9px;padding:8px}.user .name{font-size:16px}}
+</style>
+</head>
+<body>
+<div class="app">
+
+<div id="lock" class="lock">
+  <div class="lockbox">
+    <div style="font-size:55px">🔐</div>
+    <h1>Join to Continue</h1>
+    <p>Join all required channels, then verify your Telegram membership.</p>
+    <div id="channels"></div>
+    <button id="verify" class="verify">JOINED &amp; CONTINUE</button>
+    <div id="status" class="status" aria-live="polite"></div>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <header class="user">
+    <div id="avatar" class="avatar">R</div>
+    <div class="userinfo"><div id="name" class="name">Telegram User</div><div class="sub">SECURE TELEGRAM SESSION</div></div>
+    <div class="badge">● <span id="claims">0</span> Claims</div>
+  </header>
+
+  <main>
+    <section id="home" class="page active">
+      <div class="hero"><div class="icon">🏠</div><div class="title">HOME</div><p>Welcome to your rewards dashboard.</p></div>
+      <div class="stats">
+        <div class="stat"><small>TOTAL REFERRALS</small><div id="referrals" class="num">0</div></div>
+        <div class="stat"><small>CLAIMED VOUCHERS</small><div id="claimed" class="num green">0</div></div>
+      </div>
+      <div class="section"><h3>🔴 LIVE REWARD ACTIVITY</h3><div class="activity">
+        <div class="activity-item"><div class="miniavatar">S</div><div class="activity-main">A user claimed a reward<br><small>Voucher successfully claimed</small></div><div class="time">now</div></div>
+        <div class="activity-item"><div class="miniavatar">A</div><div class="activity-main">A user completed a milestone<br><small>Reward unlocked</small></div><div class="time">2m</div></div>
+      </div></div>
+    </section>
+
+    <section id="vouchers" class="page">
+      <div class="hero"><div class="icon">🎁</div><div class="title">VOUCHERS</div><p>Complete milestones to unlock rewards.</p></div>
+      <div class="milestone"><small>MILESTONE STATUS</small><div class="progress"><span id="progress">0</span>/5</div></div>
+      <h2 style="text-align:center">Claim at 5 verified invites</h2>
+      <p class="desc">Your reward becomes available when the milestone is reached.</p>
+      <button id="claim" class="primary" disabled>₹ CLAIM CODE</button>
+    </section>
+
+    <section id="invites" class="page">
+      <div class="hero"><div class="icon">🔗</div><div class="title">INVITES</div><p>Share your unique Telegram referral link.</p></div>
+      <div id="ref" class="ref">Loading referral link...</div>
+      <button id="copy" class="copy">COPY REFERRAL LINK</button>
+      <div class="section"><h3>INVITE HISTORY</h3><div id="inviteEmpty" class="empty">No verified invites yet.</div></div>
+    </section>
+
+    <section id="history" class="page">
+      <div class="hero"><div class="icon">🕒</div><div class="title">HISTORY</div><p>Your reward and voucher activity.</p></div>
+      <div class="section"><h3>CLAIMED VOUCHERS</h3><div class="empty">No rewards claimed yet.</div></div>
+    </section>
+  </main>
+
+  <nav class="bottom">
+    <button class="nav active" data-page="home"><span>⌂</span>HOME</button>
+    <button class="nav" data-page="vouchers"><span>🎁</span>VOUCHERS</button>
+    <button class="nav" data-page="invites"><span>♧</span>INVITES</button>
+    <button class="nav" data-page="history"><span>◷</span>HISTORY</button>
+  </nav>
+</div>
+</div>
+
+<script>
+const CONFIG = {
+  BOT_USERNAME: "YourRewardBot",
+  API_BASE_URL: "/api"
+};
+
+const tg = window.Telegram?.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+
+const user = tg?.initDataUnsafe?.user || null;
+const initData = tg?.initData || "";
+
+function setUser() {
+  if (!user) return;
+  document.getElementById("name").textContent = user.first_name || user.username || "Telegram User";
+  if (user.photo_url) document.getElementById("avatar").innerHTML = `<img src="${user.photo_url}" alt="Profile">`;
+}
+
+function referralLink() {
+  return user
+    ? `https://t.me/${CONFIG.BOT_USERNAME}?start=ref_${user.id}`
+    : `https://t.me/${CONFIG.BOT_USERNAME}?start=ref_demo`;
+}
+
+function showApp(data) {
+  document.getElementById("lock").hidden = true;
+  document.getElementById("app").hidden = false;
+  if (data) {
+    document.getElementById("referrals").textContent = Number(data.referrals || 0);
+    document.getElementById("claimed").textContent = Number(data.claimed || 0);
+    document.getElementById("claims").textContent = Number(data.claimed || 0);
+    document.getElementById("progress").textContent = Math.min(Number(data.referrals || 0), 5);
+  }
+}
+
+async function verifyWithServer() {
+  const status = document.getElementById("status");
+  if (!initData) {
+    status.textContent = "Open this page from your Telegram Mini App.";
+    status.style.color = "#e4c65a";
+    return;
+  }
+
+  status.textContent = "Checking membership...";
+  try {
+    const r = await fetch(`${CONFIG.API_BASE_URL}/verify`, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ initData })
+    });
+    const data = await r.json();
+    if (!r.ok || !data.verified) throw new Error(data.message || "Verification failed");
+    showApp(data);
+  } catch (e) {
+    status.textContent = e.message || "Verification failed. Try again.";
+    status.style.color = "#e4c65a";
+  }
+}
+
+async function loadChannels() {
+  const box = document.getElementById("channels");
+  try {
+    const r = await fetch(`${CONFIG.API_BASE_URL}/channels`);
+    const data = await r.json();
+    (data.channels || []).forEach(ch => {
+      const row = document.createElement("div");
+      row.className = "channel";
+      row.innerHTML = `<b>📢 ${escapeHtml(ch.name)}</b><button class="join" type="button">JOIN</button>`;
+      row.querySelector("button").addEventListener("click", () => {
+        if (tg?.openTelegramLink) tg.openTelegramLink(ch.link);
+        else window.open(ch.link, "_blank", "noopener");
+      });
+      box.appendChild(row);
+    });
+  } catch {
+    box.innerHTML = '<div style="color:#e4c65a;margin-top:12px">Channels could not be loaded.</div>';
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+document.getElementById("verify").addEventListener("click", verifyWithServer);
+
+document.querySelectorAll(".nav").forEach(btn => btn.addEventListener("click", () => {
+  const id = btn.dataset.page;
+  document.querySelectorAll(".page").forEach(p => p.classList.toggle("active", p.id === id));
+  document.querySelectorAll(".nav").forEach(n => n.classList.toggle("active", n === btn));
+}));
+
+document.getElementById("ref").textContent = referralLink();
+document.getElementById("copy").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(referralLink());
+    document.getElementById("copy").textContent = "COPIED ✓";
+    setTimeout(() => document.getElementById("copy").textContent = "COPY REFERRAL LINK", 1400);
+  } catch {
+    document.getElementById("copy").textContent = "COPY FAILED";
+  }
+});
+
+setUser();
+loadChannels();
+</script>
+</body>
+</html>
