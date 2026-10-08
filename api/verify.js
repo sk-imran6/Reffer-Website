@@ -58,7 +58,7 @@ module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(405).json({verified:false,message:"Method not allowed"});
 
   try {
-    const token = "8714642881:AAGk1Tf8BvcS6w2tX0pEGQW5VWhcOiAhyc8";
+    const token = process.env.BOT_TOKEN;
     if (!token) return res.status(500).json({verified:false,message:"BOT_TOKEN is not configured"});
 
     const user = validateInitData(req.body?.initData || "", token);
