@@ -1,358 +1,134 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
   <title>Reward Dashboard</title>
-
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-
   <style>
-    * {
-      box-sizing: border-box;
-      -webkit-tap-highlight-color: transparent;
-    }
-
-    body {
-      margin: 0;
-      background:
-        radial-gradient(circle at top left, #123b2d 0%, transparent 35%),
-        radial-gradient(circle at bottom right, #30250b 0%, transparent 35%),
-        #07100d;
-      color: #fff;
-      font-family: Arial, sans-serif;
-      min-height: 100vh;
-    }
-
-    .app {
-      max-width: 520px;
-      margin: auto;
-      padding: 18px 15px 90px;
-    }
-
-    .top {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 18px;
-    }
-
-    .brand {
-      font-size: 21px;
-      font-weight: 800;
-      color: #f5d878;
-    }
-
-    .user {
-      background: rgba(255,255,255,.07);
-      border: 1px solid rgba(255,255,255,.09);
-      padding: 8px 12px;
-      border-radius: 14px;
-      font-size: 13px;
-    }
-
-    .hero {
-      padding: 24px;
-      border-radius: 25px;
-      background:
-        linear-gradient(145deg, rgba(22,65,48,.95), rgba(12,25,20,.95));
-      border: 1px solid rgba(245,216,120,.16);
-      box-shadow: 0 15px 45px rgba(0,0,0,.3);
-      margin-bottom: 15px;
-    }
-
-    .hero small {
-      color: #aabbb3;
-    }
-
-    .balance {
-      font-size: 38px;
-      font-weight: 900;
-      margin-top: 8px;
-      color: #f5d878;
-    }
-
-    .cards {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-bottom: 16px;
-    }
-
-    .card {
-      background: rgba(255,255,255,.055);
-      border: 1px solid rgba(255,255,255,.08);
-      border-radius: 20px;
-      padding: 17px;
-    }
-
-    .card .icon {
-      font-size: 22px;
-      margin-bottom: 10px;
-    }
-
-    .card b {
-      font-size: 21px;
-    }
-
-    .card span {
-      display: block;
-      color: #98aaa2;
-      font-size: 12px;
-      margin-top: 4px;
-    }
-
-    .section {
-      display: none;
-    }
-
-    .section.active {
-      display: block;
-    }
-
-    .title {
-      font-size: 19px;
-      font-weight: 800;
-      margin: 20px 0 12px;
-    }
-
-    .voucher {
-      background: rgba(255,255,255,.055);
-      border: 1px solid rgba(245,216,120,.12);
-      border-radius: 18px;
-      padding: 16px;
-      margin-bottom: 11px;
-    }
-
-    .voucher-top {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-    }
-
-    .voucher-code {
-      color: #f5d878;
-      font-weight: 800;
-      font-size: 17px;
-    }
-
-    .voucher-desc {
-      color: #9eaea7;
-      font-size: 12px;
-      margin-top: 7px;
-    }
-
-    button {
-      border: 0;
-      cursor: pointer;
-      color: #07100d;
-      background: #f5d878;
-      font-weight: 800;
-      padding: 10px 14px;
-      border-radius: 12px;
-    }
-
-    button:disabled {
-      opacity: .45;
-    }
-
-    .invite {
-      background: linear-gradient(145deg, #123d2d, #0b1e17);
-      border: 1px solid rgba(245,216,120,.14);
-      border-radius: 22px;
-      padding: 20px;
-      margin-top: 15px;
-    }
-
-    .invite-link {
-      margin-top: 12px;
-      padding: 12px;
-      border-radius: 12px;
-      background: rgba(0,0,0,.25);
-      font-size: 12px;
-      word-break: break-all;
-      color: #c9d5cf;
-    }
-
-    .copy {
-      width: 100%;
-      margin-top: 10px;
-    }
-
-    .empty {
-      text-align: center;
-      color: #879790;
-      padding: 35px 10px;
-    }
-
-    .loading {
-      text-align: center;
-      padding: 80px 20px;
-      color: #b9c7c1;
-    }
-
-    .error {
-      text-align: center;
-      padding: 70px 20px;
-      color: #ff9b9b;
-    }
-
-    .bottom {
-      position: fixed;
-      left: 50%;
-      bottom: 10px;
-      transform: translateX(-50%);
-      width: calc(100% - 25px);
-      max-width: 490px;
-      padding: 8px;
-      display: grid;
-      grid-template-columns: repeat(4,1fr);
-      gap: 5px;
-      background: rgba(7,16,13,.94);
-      backdrop-filter: blur(18px);
-      border: 1px solid rgba(255,255,255,.08);
-      border-radius: 19px;
-    }
-
-    .nav {
-      background: transparent;
-      color: #82928c;
-      padding: 9px 3px;
-      font-size: 11px;
-    }
-
-    .nav.active {
-      color: #f5d878;
-      background: rgba(245,216,120,.08);
-    }
-
-    .toast {
-      position: fixed;
-      left: 50%;
-      bottom: 85px;
-      transform: translateX(-50%);
-      background: #17231e;
-      border: 1px solid rgba(255,255,255,.1);
-      padding: 11px 16px;
-      border-radius: 14px;
-      display: none;
-      z-index: 20;
-      font-size: 13px;
-    }
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+    body{margin:0;background:radial-gradient(circle at top left,#123b2d 0%,transparent 35%),radial-gradient(circle at bottom right,#30250b 0%,transparent 35%),#07100d;color:#fff;font-family:Arial,sans-serif;min-height:100vh}
+    .app{max-width:520px;margin:auto;padding:18px 15px 90px}
+    .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+    .brand{font-size:21px;font-weight:800;color:#f5d878}
+    .user{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.09);padding:8px 12px;border-radius:14px;font-size:13px}
+    .hero{padding:24px;border-radius:25px;background:linear-gradient(145deg,rgba(22,65,48,.95),rgba(12,25,20,.95));border:1px solid rgba(245,216,120,.16);box-shadow:0 15px 45px rgba(0,0,0,.3);margin-bottom:15px}
+    .hero small{color:#aabbb3}
+    .balance{font-size:38px;font-weight:900;margin-top:8px;color:#f5d878}
+    .cards{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+    .card{background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.08);border-radius:20px;padding:17px}
+    .card .icon{font-size:22px;margin-bottom:10px}
+    .card b{font-size:21px}
+    .card span{display:block;color:#98aaa2;font-size:12px;margin-top:4px}
+    .section{display:none}
+    .section.active{display:block}
+    .title{font-size:19px;font-weight:800;margin:20px 0 12px}
+    .voucher{background:rgba(255,255,255,.055);border:1px solid rgba(245,216,120,.12);border-radius:18px;padding:16px;margin-bottom:11px}
+    .voucher-top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+    .voucher-code{color:#f5d878;font-weight:800;font-size:17px;overflow-wrap:anywhere}
+    .voucher-desc{color:#9eaea7;font-size:12px;margin-top:7px}
+    button{border:0;cursor:pointer;color:#07100d;background:#f5d878;font-weight:800;padding:10px 14px;border-radius:12px}
+    button:disabled{opacity:.45;cursor:not-allowed}
+    .invite{background:linear-gradient(145deg,#123d2d,#0b1e17);border:1px solid rgba(245,216,120,.14);border-radius:22px;padding:20px;margin-top:15px}
+    .invite-link{margin-top:12px;padding:12px;border-radius:12px;background:rgba(0,0,0,.25);font-size:12px;word-break:break-all;color:#c9d5cf}
+    .copy{width:100%;margin-top:10px}
+    .empty{text-align:center;color:#879790;padding:35px 10px}
+    .loading,.error{text-align:center;padding:70px 20px;color:#b9c7c1}
+    .error{color:#ff9b9b}
+    .bottom{position:fixed;left:50%;bottom:10px;transform:translateX(-50%);width:calc(100% - 25px);max-width:490px;padding:8px;display:grid;grid-template-columns:repeat(4,1fr);gap:5px;background:rgba(7,16,13,.94);backdrop-filter:blur(18px);border:1px solid rgba(255,255,255,.08);border-radius:19px}
+    .nav{background:transparent;color:#82928c;padding:9px 3px;font-size:11px}
+    .nav.active{color:#f5d878;background:rgba(245,216,120,.08)}
+    .toast{position:fixed;left:50%;bottom:85px;transform:translateX(-50%);background:#17231e;border:1px solid rgba(255,255,255,.1);padding:11px 16px;border-radius:14px;display:none;z-index:20;font-size:13px;max-width:90%;text-align:center}
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.78);display:none;align-items:center;justify-content:center;padding:22px;z-index:30}
+    .modal-box{width:100%;max-width:380px;background:#102019;border:1px solid rgba(245,216,120,.3);border-radius:22px;padding:23px;text-align:center}
+    .modal-code{font-size:22px;font-weight:900;color:#f5d878;overflow-wrap:anywhere;margin:18px 0}
+    .modal-actions{display:flex;gap:9px}
+    .modal-actions button{flex:1}
+    .secondary{background:#263a30;color:#fff}
   </style>
 </head>
-
 <body>
-
-<div id="loading" class="loading">
-  Loading dashboard...
-</div>
-
+<div id="loading" class="loading">Loading dashboard...</div>
 <div id="error" class="error" style="display:none"></div>
 
 <div id="app" class="app" style="display:none">
-
   <div class="top">
     <div class="brand">Reward Center</div>
     <div class="user" id="username">@user</div>
   </div>
 
-  <!-- HOME -->
   <section id="home" class="section active">
-
     <div class="hero">
       <small>Available Balance</small>
       <div class="balance" id="balance">₹0</div>
     </div>
-
     <div class="cards">
-      <div class="card">
-        <div class="icon">🎁</div>
-        <b id="voucherCount">0</b>
-        <span>Available Vouchers</span>
-      </div>
-
-      <div class="card">
-        <div class="icon">👥</div>
-        <b id="refCount">0</b>
-        <span>Total Referrals</span>
-      </div>
+      <div class="card"><div class="icon">🎁</div><b id="voucherCount">0</b><span>Available Vouchers</span></div>
+      <div class="card"><div class="icon">👥</div><b id="refCount">0</b><span>Available Referrals</span></div>
     </div>
-
     <div class="invite">
       <div class="title" style="margin:0">Invite Friends</div>
-      <div style="color:#9eaea7;font-size:13px;margin-top:6px">
-        Share your referral link and earn rewards.
-      </div>
-
-      <div class="invite-link" id="refLink">
-        Loading...
-      </div>
-
-      <button class="copy" onclick="copyReferral()">
-        Copy Referral Link
-      </button>
+      <div style="color:#9eaea7;font-size:13px;margin-top:6px">Share your referral link and earn rewards.</div>
+      <div class="invite-link" id="refLink">Loading...</div>
+      <button class="copy" onclick="copyReferral()">Copy Referral Link</button>
     </div>
-
   </section>
 
-  <!-- VOUCHERS -->
   <section id="vouchers" class="section">
-    <div class="title">🎁 Vouchers</div>
+    <div class="title">🎁 Claim Voucher Code</div>
+    <div class="invite" style="margin-bottom:14px">
+      <b>How to claim</b>
+      <p style="color:#9eaea7;font-size:13px;line-height:1.6;margin-bottom:0">
+        Use 5 available referrals to claim the common voucher code. Each successful claim uses 5 referrals.
+      </p>
+    </div>
     <div id="voucherList"></div>
   </section>
 
-  <!-- INVITES -->
   <section id="invites" class="section">
     <div class="title">👥 Referrals</div>
-
     <div class="hero">
-      <small>Total Referrals</small>
+      <small>Available Referrals</small>
       <div class="balance" id="refBig">0</div>
+      <small id="refDetail">Lifetime referrals: 0</small>
     </div>
-
     <div class="invite">
       <b>How it works</b>
       <p style="color:#9eaea7;font-size:13px;line-height:1.6">
-        Share your referral link with friends. Referral rewards are
-        controlled by the bot administrator.
+        Share your referral link. Every successful voucher claim uses 5 available referrals. Your referral history remains saved.
       </p>
-
-      <button class="copy" onclick="copyReferral()">
-        Copy My Link
-      </button>
+      <button class="copy" onclick="copyReferral()">Copy My Link</button>
     </div>
   </section>
 
-  <!-- HISTORY -->
   <section id="history" class="section">
     <div class="title">📜 History</div>
-
-    <div class="empty">
-      Transaction history will appear here.
-    </div>
+    <div class="empty">Claim history will appear here in a future update.</div>
   </section>
-
 </div>
 
 <div id="toast" class="toast"></div>
 
+<div id="claimModal" class="modal">
+  <div class="modal-box">
+    <div style="font-size:32px">🎉</div>
+    <h2 style="margin:10px 0;color:#f5d878">Claim Successful!</h2>
+    <p style="color:#aabbb3;font-size:13px">Your voucher code:</p>
+    <div id="claimedCode" class="modal-code"></div>
+    <div id="claimedDesc" style="color:#aabbb3;font-size:12px;margin-bottom:18px"></div>
+    <div class="modal-actions">
+      <button onclick="copyClaimedCode()">Copy Code</button>
+      <button class="secondary" onclick="closeClaimModal()">Close</button>
+    </div>
+  </div>
+</div>
+
 <div id="bottom" class="bottom" style="display:none">
-  <button class="nav active" onclick="showTab('home',this)">
-    🏠<br>Home
-  </button>
-
-  <button class="nav" onclick="showTab('vouchers',this)">
-    🎁<br>Vouchers
-  </button>
-
-  <button class="nav" onclick="showTab('invites',this)">
-    👥<br>Invites
-  </button>
-
-  <button class="nav" onclick="showTab('history',this)">
-    📜<br>History
-  </button>
+  <button class="nav active" onclick="showTab('home',this)">🏠<br>Home</button>
+  <button class="nav" onclick="showTab('vouchers',this)">🎁<br>Vouchers</button>
+  <button class="nav" onclick="showTab('invites',this)">👥<br>Invites</button>
+  <button class="nav" onclick="showTab('history',this)">📜<br>History</button>
 </div>
 
 <script>
@@ -366,51 +142,40 @@
   }
 
   const initData = tg?.initData || "";
-
   let appData = null;
+  let claimInProgress = false;
+  let lastClaimedCode = "";
 
   function showError(message) {
     document.getElementById("loading").style.display = "none";
     document.getElementById("app").style.display = "none";
     document.getElementById("bottom").style.display = "none";
-
     const box = document.getElementById("error");
-    box.innerHTML = message;
+    box.textContent = message;
     box.style.display = "block";
   }
 
   function toast(message) {
     const el = document.getElementById("toast");
-
     el.textContent = message;
     el.style.display = "block";
-
     clearTimeout(window.toastTimer);
-
     window.toastTimer = setTimeout(() => {
       el.style.display = "none";
-    }, 2200);
+    }, 2500);
   }
 
   async function loadApp() {
-
     if (!initData) {
-      showError(
-        "Please open this dashboard from the Telegram bot."
-      );
-      return;
+      showError("Please open this dashboard from the Telegram bot.");
+      return false;
     }
 
     try {
-
       const response = await fetch("/api/app", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          initData: initData
-        })
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({initData})
       });
 
       const data = await response.json();
@@ -420,127 +185,100 @@
       }
 
       appData = data;
-
       render();
-
+      return true;
     } catch (error) {
-
-      showError(
-        error.message || "Something went wrong."
-      );
-
+      showError(error.message || "Something went wrong.");
+      return false;
     }
   }
 
   function render() {
-
     document.getElementById("loading").style.display = "none";
+    document.getElementById("error").style.display = "none";
     document.getElementById("app").style.display = "block";
     document.getElementById("bottom").style.display = "grid";
 
     const user = appData.user || {};
+    const available = Number(appData.referrals || 0);
+    const total = Number(appData.total_referrals ?? available);
 
     document.getElementById("username").textContent =
-      user.username
-        ? "@" + user.username
-        : user.first_name || "User";
+      user.username ? "@" + user.username : (user.first_name || "User");
 
     document.getElementById("balance").textContent =
       "₹" + Number(user.balance || 0).toFixed(2);
 
-    document.getElementById("refCount").textContent =
-      appData.referrals || 0;
-
-    document.getElementById("refBig").textContent =
-      appData.referrals || 0;
+    document.getElementById("refCount").textContent = available;
+    document.getElementById("refBig").textContent = available;
+    document.getElementById("refDetail").textContent =
+      "Lifetime referrals: " + total;
 
     const vouchers = appData.vouchers || [];
+    document.getElementById("voucherCount").textContent = vouchers.length;
 
-    document.getElementById("voucherCount").textContent =
-      vouchers.length;
-
-    const botUsername =
-      appData.bot_username ||
-      user.bot_username ||
-      "";
-
-    let referralLink = "";
-
-    if (botUsername) {
-      referralLink =
-        "https://t.me/" +
-        botUsername +
-        "?start=ref_" +
-        user.telegram_id;
-    }
+    const botUsername = appData.bot_username || "";
+    const referralLink = botUsername && user.telegram_id
+      ? "https://t.me/" + botUsername + "?start=ref_" + encodeURIComponent(user.telegram_id)
+      : "";
 
     document.getElementById("refLink").textContent =
       referralLink || "Referral link unavailable";
 
-    renderVouchers(vouchers);
+    renderVouchers(vouchers, available);
   }
 
-  function renderVouchers(vouchers) {
-
+  function renderVouchers(vouchers, available) {
     const list = document.getElementById("voucherList");
 
     if (!vouchers.length) {
-
-      list.innerHTML =
-        '<div class="empty">No vouchers available right now.</div>';
-
+      list.innerHTML = '<div class="empty">No voucher code is configured yet.</div>';
       return;
     }
 
     list.innerHTML = vouchers.map(voucher => {
-
-      const claimed =
-        (appData.claimed_vouchers || [])
-          .includes(Number(voucher.id));
+      const id = Number(voucher.id);
+      const enough = available >= 5;
+      const busy = claimInProgress;
 
       return `
         <div class="voucher">
-
           <div class="voucher-top">
-
-            <div>
-              <div class="voucher-code">
-                ${escapeHtml(voucher.code || "Voucher")}
-              </div>
-
-              <div class="voucher-desc">
-                ${escapeHtml(voucher.description || "Reward voucher")}
-              </div>
+            <div style="flex:1;min-width:0">
+              <div class="voucher-code">${escapeHtml(voucher.description || "Reward Voucher")}</div>
+              <div class="voucher-desc">Required: 5 referrals · Your available: ${available}</div>
             </div>
-
             <button
-              ${claimed ? "disabled" : ""}
-              onclick="claimVoucher(${Number(voucher.id)})"
-            >
-              ${claimed ? "Claimed" : "Claim"}
+              id="claim-btn-${id}"
+              ${(!enough || busy) ? "disabled" : ""}
+              onclick="claimVoucher(${id})">
+              ${busy ? "Please wait..." : (enough ? "Claim" : "Need 5")}
             </button>
-
           </div>
-
         </div>
       `;
-
     }).join("");
   }
 
   async function claimVoucher(id) {
+    if (!initData || claimInProgress) return;
 
-    if (!initData) return;
+    const available = Number(appData?.referrals || 0);
+
+    if (available < 5) {
+      toast("You need 5 available referrals.");
+      return;
+    }
+
+    claimInProgress = true;
+    renderVouchers(appData.vouchers || [], available);
 
     try {
-
       const response = await fetch("/api/claim", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
+        headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
-          initData: initData,
+          initData,
           voucher_id: id
         })
       });
@@ -551,42 +289,64 @@
         throw new Error(data.error || "Claim failed.");
       }
 
-      toast(data.message || "Voucher claimed!");
+      lastClaimedCode = String(data.code || "");
+
+      if (!lastClaimedCode) {
+        toast("Claim succeeded, but no code was returned. Contact support.");
+      } else {
+        document.getElementById("claimedCode").textContent = lastClaimedCode;
+        document.getElementById("claimedDesc").textContent =
+          data.description || "Keep this code for your use.";
+        document.getElementById("claimModal").style.display = "flex";
+      }
 
       await loadApp();
+      toast("5 referrals used successfully.");
 
     } catch (error) {
-
       toast(error.message || "Unable to claim voucher.");
+    } finally {
+      claimInProgress = false;
+      if (appData) render();
     }
+  }
+
+  async function copyClaimedCode() {
+    if (!lastClaimedCode) {
+      toast("No voucher code available.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(lastClaimedCode);
+      toast("Voucher code copied!");
+    } catch {
+      toast("Copy failed. Please copy the code manually.");
+    }
+  }
+
+  function closeClaimModal() {
+    document.getElementById("claimModal").style.display = "none";
   }
 
   function showTab(tab, button) {
+    document.querySelectorAll(".section").forEach(section => {
+      section.classList.remove("active");
+    });
 
-    document.querySelectorAll(".section")
-      .forEach(section => {
-        section.classList.remove("active");
-      });
+    document.getElementById(tab).classList.add("active");
 
-    document.getElementById(tab)
-      .classList.add("active");
-
-    document.querySelectorAll(".nav")
-      .forEach(btn => {
-        btn.classList.remove("active");
-      });
+    document.querySelectorAll(".nav").forEach(btn => {
+      btn.classList.remove("active");
+    });
 
     button.classList.add("active");
 
-    if (tg?.HapticFeedback) {
-      tg.HapticFeedback.selectionChanged();
-    }
+    if (tg?.HapticFeedback) tg.HapticFeedback.selectionChanged();
   }
 
   async function copyReferral() {
-
-    const text =
-      document.getElementById("refLink").textContent;
+    const text = document.getElementById("refLink").textContent;
 
     if (!text || text === "Referral link unavailable") {
       toast("Referral link unavailable");
@@ -594,19 +354,14 @@
     }
 
     try {
-
       await navigator.clipboard.writeText(text);
-
       toast("Referral link copied!");
-
     } catch {
-
-      toast("Copy failed");
+      toast("Copy failed.");
     }
   }
 
   function escapeHtml(value) {
-
     return String(value)
       .replaceAll("&", "&amp;")
       .replaceAll("<", "&lt;")
@@ -617,6 +372,5 @@
 
   loadApp();
 </script>
-
 </body>
 </html>
