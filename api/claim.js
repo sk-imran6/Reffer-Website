@@ -1,3 +1,4 @@
+
 const crypto = require("crypto");
 const { Pool } = require("pg");
 
@@ -39,18 +40,17 @@ function validateInitData(initData) {
     if (
       receivedHash.length !== calculatedHash.length ||
       !crypto.timingSafeEqual(
-        Buffer.from(receivedHash),
-        Buffer.from(calculatedHash)
+        Buffer.from(receivedHash, "hex"),
+        Buffer.from(calculatedHash, "hex")
       )
     ) {
       return null;
     }
 
     const authDate = Number(params.get("auth_date") || 0);
+    const now = Math.floor(Date.now() / 1000);
 
-    if (!authDate) return null;
-
-    if (Math.floor(Date.now() / 1000) - authDate > 86400) {
+    if (!authDate || authDate > now + 60 || now - authDate > 86400) {
       return null;
     }
 
@@ -59,14 +59,12 @@ function validateInitData(initData) {
     if (!user || !user.id) return null;
 
     return user;
-
   } catch {
     return null;
   }
 }
 
 module.exports = async (req, res) => {
-
   if (req.method !== "POST") {
     return send(res, 405, {
       ok: false,
@@ -81,32 +79,46 @@ module.exports = async (req, res) => {
     });
   }
 
-  const client = await pool.connect();
+  const body =
+    typeof req.body === "string"
+      ? (() => {
+          try {
+            return JSON.parse(req.body || "{}");
+          } catch {
+            return null;
+          }
+        })()
+      : (req.body || {});
+
+  if (!body) {
+    return send(res, 400, {
+      ok: false,
+      error: "Invalid request body"
+    });
+  }
+
+  const telegramUser = validateInitData(body.initData);
+
+  if (!telegramUser) {
+    return send(res, 401, {
+      ok: false,
+      error: "Invalid Telegram session"
+    });
+  }
+
+  const voucherId = Number(body.voucher_id);
+
+  if (!Number.isInteger(voucherId) || voucherId <= 0) {
+    return send(res, 400, {
+      ok: false,
+      error: "Invalid voucher"
+    });
+  }
+
+  let client;
 
   try {
-
-    const body =
-      typeof req.body === "string"
-        ? JSON.parse(req.body || "{}")
-        : (req.body || {});
-
-    const telegramUser = validateInitData(body.initData);
-
-    if (!telegramUser) {
-      return send(res, 401, {
-        ok: false,
-        error: "Invalid Telegram session"
-      });
-    }
-
-    const voucherId = Number(body.voucher_id);
-
-    if (!Number.isInteger(voucherId) || voucherId <= 0) {
-      return send(res, 400, {
-        ok: false,
-        error: "Invalid voucher"
-      });
-    }
+    client = await pool.connect();
 
     await client.query("BEGIN");
 
@@ -122,10 +134,9 @@ module.exports = async (req, res) => {
 
     if (!userResult.rows.length) {
       await client.query("ROLLBACK");
-
       return send(res, 404, {
         ok: false,
-        error: "User not found"
+        error: "Please start the bot first."
       });
     }
 
@@ -133,7 +144,6 @@ module.exports = async (req, res) => {
 
     if (user.blocked) {
       await client.query("ROLLBACK");
-
       return send(res, 403, {
         ok: false,
         error: "Your account is blocked."
@@ -142,7 +152,6 @@ module.exports = async (req, res) => {
 
     if (!user.verified) {
       await client.query("ROLLBACK");
-
       return send(res, 403, {
         ok: false,
         error: "Please complete channel verification first."
@@ -151,13 +160,7 @@ module.exports = async (req, res) => {
 
     const voucherResult = await client.query(
       `
-      SELECT
-        id,
-        code,
-        description,
-        reward,
-        active,
-        expires_at
+      SELECT id, code, description, reward, active, expires_at
       FROM vouchers
       WHERE id = $1
       FOR UPDATE
@@ -167,7 +170,6 @@ module.exports = async (req, res) => {
 
     if (!voucherResult.rows.length) {
       await client.query("ROLLBACK");
-
       return send(res, 404, {
         ok: false,
         error: "Voucher not found."
@@ -178,7 +180,6 @@ module.exports = async (req, res) => {
 
     if (!voucher.active) {
       await client.query("ROLLBACK");
-
       return send(res, 400, {
         ok: false,
         error: "This voucher is no longer active."
@@ -190,87 +191,80 @@ module.exports = async (req, res) => {
       new Date(voucher.expires_at).getTime() <= Date.now()
     ) {
       await client.query("ROLLBACK");
-
       return send(res, 400, {
         ok: false,
         error: "This voucher has expired."
       });
     }
 
-    const alreadyClaimed = await client.query(
+    const referralResult = await client.query(
       `
-      SELECT id
-      FROM voucher_claims
-      WHERE user_id = $1
-        AND voucher_id = $2
-      LIMIT 1
+      SELECT COUNT(*)::int AS total
+      FROM referrals
+      WHERE referrer_id = $1
       `,
-      [user.id, voucher.id]
+      [user.id]
     );
 
-    if (alreadyClaimed.rows.length) {
-      await client.query("ROLLBACK");
+    const usedResult = await client.query(
+      `
+      SELECT COALESCE(SUM(referrals_used), 0)::int AS used
+      FROM referral_claims
+      WHERE user_id = $1
+      `,
+      [user.id]
+    );
 
-      return send(res, 409, {
-        ok: false,
-        error: "You already claimed this voucher."
-      });
-    }
+    const totalReferrals = referralResult.rows[0].total;
+    const referralsUsed = usedResult.rows[0].used;
+    const availableReferrals = Math.max(
+      0,
+      totalReferrals - referralsUsed
+    );
 
-    const reward = Number(voucher.reward || 0);
-
-    if (!Number.isFinite(reward) || reward < 0) {
+    if (availableReferrals < 5) {
       await client.query("ROLLBACK");
 
       return send(res, 400, {
         ok: false,
-        error: "Invalid voucher reward."
+        error: "You need 5 available referrals to claim this code.",
+        total_referrals: totalReferrals,
+        referrals_used: referralsUsed,
+        available_referrals: availableReferrals,
+        required_referrals: 5
       });
     }
 
     await client.query(
       `
-      INSERT INTO voucher_claims
-        (user_id, voucher_id)
+      INSERT INTO referral_claims
+        (user_id, referrals_used, voucher_id)
       VALUES
-        ($1, $2)
+        ($1, 5, $2)
       `,
       [user.id, voucher.id]
     );
 
-    const updatedUser = await client.query(
-      `
-      UPDATE users
-      SET balance = COALESCE(balance, 0) + $1
-      WHERE id = $2
-      RETURNING balance
-      `,
-      [reward, user.id]
-    );
+    const remainingReferrals = availableReferrals - 5;
 
     await client.query("COMMIT");
 
     return send(res, 200, {
       ok: true,
-      message:
-        reward > 0
-          ? `Voucher claimed! ₹${reward} added.`
-          : "Voucher claimed successfully.",
-      reward,
-      balance: updatedUser.rows[0].balance
+      message: "Voucher code claimed successfully!",
+      code: voucher.code,
+      description: voucher.description || "",
+      referrals_used: 5,
+      total_referrals: totalReferrals,
+      available_referrals: remainingReferrals,
+      required_referrals: 5
     });
 
   } catch (error) {
-
-    try {
-      await client.query("ROLLBACK");
-    } catch {}
-
-    if (error.code === "23505") {
-      return send(res, 409, {
-        ok: false,
-        error: "You already claimed this voucher."
-      });
+    if (client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {}
     }
 
     console.error("CLAIM API ERROR:", error);
@@ -281,6 +275,6 @@ module.exports = async (req, res) => {
     });
 
   } finally {
-    client.release();
+    if (client) client.release();
   }
 };
