@@ -1,3 +1,4 @@
+
 const crypto = require("crypto");
 const { Pool } = require("pg");
 
@@ -7,7 +8,7 @@ const pool = new Pool({
 });
 
 function json(res, status, data) {
-  res.status(status).json(data);
+  return res.status(status).json(data);
 }
 
 function validateTelegramInitData(initData) {
@@ -39,19 +40,17 @@ function validateTelegramInitData(initData) {
     if (
       receivedHash.length !== calculatedHash.length ||
       !crypto.timingSafeEqual(
-        Buffer.from(receivedHash),
-        Buffer.from(calculatedHash)
+        Buffer.from(receivedHash, "hex"),
+        Buffer.from(calculatedHash, "hex")
       )
     ) {
       return null;
     }
 
     const authDate = Number(params.get("auth_date") || 0);
+    const now = Math.floor(Date.now() / 1000);
 
-    if (!authDate) return null;
-
-    // Reject initData older than 24 hours.
-    if (Math.floor(Date.now() / 1000) - authDate > 86400) {
+    if (!authDate || authDate > now + 60 || now - authDate > 86400) {
       return null;
     }
 
@@ -60,14 +59,12 @@ function validateTelegramInitData(initData) {
     if (!user || !user.id) return null;
 
     return user;
-
   } catch {
     return null;
   }
 }
 
 module.exports = async (req, res) => {
-
   if (req.method !== "POST") {
     return json(res, 405, {
       ok: false,
@@ -83,15 +80,12 @@ module.exports = async (req, res) => {
   }
 
   try {
-
     const body =
       typeof req.body === "string"
         ? JSON.parse(req.body || "{}")
         : (req.body || {});
 
-    const telegramUser = validateTelegramInitData(
-      body.initData
-    );
+    const telegramUser = validateTelegramInitData(body.initData);
 
     if (!telegramUser) {
       return json(res, 401, {
@@ -158,7 +152,7 @@ module.exports = async (req, res) => {
 
     const claimedResult = await pool.query(
       `
-      SELECT voucher_id
+      SELECT DISTINCT voucher_id
       FROM voucher_claims
       WHERE user_id = $1
       `,
@@ -167,11 +161,27 @@ module.exports = async (req, res) => {
 
     const referralResult = await pool.query(
       `
-      SELECT COUNT(*)::int AS count
+      SELECT COUNT(*)::int AS total
       FROM referrals
       WHERE referrer_id = $1
       `,
       [user.id]
+    );
+
+    const usedResult = await pool.query(
+      `
+      SELECT COALESCE(SUM(referrals_used), 0)::int AS used
+      FROM referral_claims
+      WHERE user_id = $1
+      `,
+      [user.id]
+    );
+
+    const totalReferrals = referralResult.rows[0]?.total || 0;
+    const referralsUsed = usedResult.rows[0]?.used || 0;
+    const availableReferrals = Math.max(
+      0,
+      totalReferrals - referralsUsed
     );
 
     const settingsResult = await pool.query(
@@ -224,22 +234,21 @@ module.exports = async (req, res) => {
         botConfig.bot_link ||
         "",
 
-      referrals:
-        referralResult.rows[0]?.count || 0,
+      referrals: availableReferrals,
+      total_referrals: totalReferrals,
+      referrals_used: referralsUsed,
+      referrals_required: 5,
 
-      vouchers:
-        voucherResult.rows,
+      vouchers: voucherResult.rows,
 
-      claimed_vouchers:
-        claimedResult.rows.map(
-          row => Number(row.voucher_id)
-        ),
+      claimed_vouchers: claimedResult.rows.map(
+        row => Number(row.voucher_id)
+      ),
 
       settings
     });
 
   } catch (error) {
-
     console.error("APP API ERROR:", error);
 
     return json(res, 500, {
