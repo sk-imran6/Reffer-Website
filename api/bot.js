@@ -10,7 +10,7 @@ const WEB_APP_URL = process.env.WEB_APP_URL;
 const BOT_USERNAME = process.env.BOT_USERNAME || "";
 
 function reply(res, data) {
-  res.status(200).json(data);
+  return res.status(200).json(data);
 }
 
 async function telegram(method, params = {}) {
@@ -54,6 +54,19 @@ async function editMessage(chatId, messageId, text, extra = {}) {
   });
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+/* =========================
+   ADMIN HELPERS
+========================= */
+
 async function getAdmin(telegramId) {
   const r = await pool.query(
     `
@@ -73,10 +86,8 @@ async function ensureOwner() {
 
   await pool.query(
     `
-    INSERT INTO admins
-      (telegram_id, role)
-    VALUES
-      ($1, 'owner')
+    INSERT INTO admins (telegram_id, role)
+    VALUES ($1, 'owner')
     ON CONFLICT (telegram_id)
     DO UPDATE SET role = 'owner'
     `,
@@ -84,16 +95,30 @@ async function ensureOwner() {
   );
 }
 
+function hasChannelPermission(admin) {
+  return [
+    "owner",
+    "super_admin",
+    "admin"
+  ].includes(admin.role);
+}
+
+function isOwnerRole(admin) {
+  return [
+    "owner",
+    "super_admin"
+  ].includes(admin.role);
+}
+
+/* =========================
+   USER HELPERS
+========================= */
+
 async function saveUser(user) {
   const r = await pool.query(
     `
     INSERT INTO users
-      (
-        telegram_id,
-        username,
-        first_name,
-        last_name
-      )
+      (telegram_id, username, first_name, last_name)
     VALUES
       ($1, $2, $3, $4)
     ON CONFLICT (telegram_id)
@@ -114,6 +139,10 @@ async function saveUser(user) {
 
   return r.rows[0];
 }
+
+/* =========================
+   CHANNEL HELPERS
+========================= */
 
 async function getRequiredChannels() {
   const r = await pool.query(
@@ -141,23 +170,25 @@ async function isJoined(channelId, userId) {
       user_id: userId
     });
 
-    if (!r.ok) return false;
+    if (!r.ok || !r.result) return false;
 
     const status = r.result.status;
 
-    return [
-      "creator",
-      "administrator",
-      "member"
-    ].includes(status);
-  } catch {
+    return (
+      ["creator", "administrator", "member"].includes(status) ||
+      (
+        status === "restricted" &&
+        r.result.is_member === true
+      )
+    );
+  } catch (error) {
+    console.error("CHANNEL MEMBERSHIP ERROR:", error);
     return false;
   }
 }
 
 async function checkAllChannels(userId) {
   const channels = await getRequiredChannels();
-
   const notJoined = [];
 
   for (const channel of channels) {
@@ -177,31 +208,52 @@ async function checkAllChannels(userId) {
   };
 }
 
+/* =========================
+   JOIN KEYBOARD
+   Two channel buttons per row
+========================= */
+
 function joinKeyboard(channels) {
   const rows = [];
+  let row = [];
 
   for (const channel of channels) {
+    const storedUsername = String(
+      channel.username || ""
+    ).trim();
+
+    const validUsername = /^[A-Za-z0-9_]{5,}$/.test(
+      storedUsername.replace(/^@/, "")
+    );
+
     const link =
       channel.invite_link ||
       (
-        channel.username
-          ? `https://t.me/${channel.username.replace("@", "")}`
+        validUsername
+          ? `https://t.me/${storedUsername.replace("@", "")}`
           : null
       );
 
-    if (link) {
-      rows.push([
-        {
-          text: `📢 ${channel.title || "Join Channel"}`,
-          url: link
-        }
-      ]);
+    if (!link) continue;
+
+    row.push({
+      text: `📢 ${channel.title || "Join Channel"}`,
+      url: link
+    });
+
+    if (row.length === 2) {
+      rows.push(row);
+      row = [];
     }
+  }
+
+  if (row.length) {
+    rows.push(row);
   }
 
   rows.push([
     {
-      text: "✅ Check Joined",
+      text: "🔄 Request Check",
       callback_data: "check_join"
     }
   ]);
@@ -231,6 +283,10 @@ function dashboardKeyboard() {
     ]
   };
 }
+
+/* =========================
+   ADMIN KEYBOARD
+========================= */
 
 function adminKeyboard(role) {
   const rows = [
@@ -280,20 +336,23 @@ function adminKeyboard(role) {
   };
 }
 
+/* =========================
+   START / VERIFICATION
+========================= */
+
 async function showStart(chatId, user) {
   await saveUser(user);
 
   const check = await checkAllChannels(user.id);
 
   if (!check.allJoined) {
-
     return sendMessage(
       chatId,
       `<b>🔐 Welcome to Reward Center</b>
 
 To continue, please join all required channels below.
 
-After joining, tap <b>Check Joined</b>.`,
+After joining, tap <b>Request Check</b>.`,
       {
         reply_markup: joinKeyboard(check.notJoined)
       }
@@ -325,28 +384,14 @@ Your dashboard is ready.`,
   );
 }
 
+/* =========================
+   REFERRAL SYSTEM
+========================= */
+
 async function processReferral(user) {
-
-  const existing = await pool.query(
+  const referredUser = await pool.query(
     `
-    SELECT id
-    FROM referrals
-    WHERE referred_user_id = (
-      SELECT id
-      FROM users
-      WHERE telegram_id = $1
-      LIMIT 1
-    )
-    LIMIT 1
-    `,
-    [String(user.id)]
-  );
-
-  if (existing.rows.length) return;
-
-  const ref = await pool.query(
-    `
-    SELECT referred_by
+    SELECT id, referred_by
     FROM users
     WHERE telegram_id = $1
     LIMIT 1
@@ -354,18 +399,27 @@ async function processReferral(user) {
     [String(user.id)]
   );
 
-  if (
-    !ref.rows.length ||
-    !ref.rows[0].referred_by
-  ) {
-    return;
-  }
+  if (!referredUser.rows.length) return;
 
-  const referredBy = Number(
-    ref.rows[0].referred_by
+  const currentUser = referredUser.rows[0];
+
+  const existing = await pool.query(
+    `
+    SELECT id
+    FROM referrals
+    WHERE referred_user_id = $1
+    LIMIT 1
+    `,
+    [currentUser.id]
   );
 
-  if (referredBy === Number(user.id)) return;
+  if (existing.rows.length) return;
+
+  if (!currentUser.referred_by) return;
+
+  const referredBy = Number(currentUser.referred_by);
+
+  if (!Number.isFinite(referredBy)) return;
 
   const referrer = await pool.query(
     `
@@ -379,6 +433,10 @@ async function processReferral(user) {
 
   if (!referrer.rows.length) return;
 
+  if (Number(referrer.rows[0].telegram_id) === Number(user.id)) {
+    return;
+  }
+
   const setting = await pool.query(
     `
     SELECT value
@@ -388,32 +446,26 @@ async function processReferral(user) {
     `
   );
 
-  const bonus = Number(
-    setting.rows[0]?.value || 0
-  );
+  const bonus = Number(setting.rows[0]?.value || 0);
 
-  await pool.query(
+  const inserted = await pool.query(
     `
     INSERT INTO referrals
       (referrer_id, referred_user_id)
-    VALUES
-      ($1, (
-        SELECT id
-        FROM users
-        WHERE telegram_id = $2
-        LIMIT 1
-      ))
+    VALUES ($1, $2)
     ON CONFLICT (referred_user_id)
     DO NOTHING
+    RETURNING id
     `,
     [
       referredBy,
-      String(user.id)
+      currentUser.id
     ]
   );
 
-  if (bonus > 0) {
+  if (!inserted.rows.length) return;
 
+  if (bonus > 0) {
     await pool.query(
       `
       UPDATE users
@@ -435,24 +487,17 @@ You received <b>₹${bonus.toFixed(2)}</b> referral reward.`
   }
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
+/* =========================
+   ADMIN DASHBOARD
+========================= */
 
 async function adminDashboard(chatId, messageId) {
-
   const [
     users,
     verified,
     vouchers,
     referrals
   ] = await Promise.all([
-
     pool.query(`
       SELECT COUNT(*)::int AS count
       FROM users
@@ -474,7 +519,6 @@ async function adminDashboard(chatId, messageId) {
       SELECT COUNT(*)::int AS count
       FROM referrals
     `)
-
   ]);
 
   return editMessage(
@@ -525,8 +569,11 @@ async function adminDashboard(chatId, messageId) {
   );
 }
 
-async function adminUsers(chatId, messageId) {
+/* =========================
+   ADMIN USERS
+========================= */
 
+async function adminUsers(chatId, messageId) {
   const r = await pool.query(`
     SELECT
       telegram_id,
@@ -547,12 +594,16 @@ async function adminUsers(chatId, messageId) {
   } else {
     for (const u of r.rows) {
       text +=
-        `👤 <b>${escapeHtml(
-          u.first_name || "User"
-        )}</b>\n` +
-        `ID: <code>${u.telegram_id}</code>\n` +
+        `👤 <b>${escapeHtml(u.first_name || "User")}</b>\n` +
+        `ID: <code>${escapeHtml(u.telegram_id)}</code>\n` +
         `Balance: ₹${Number(u.balance || 0).toFixed(2)}\n` +
-        `Status: ${u.blocked ? "🚫 Blocked" : u.verified ? "✅ Verified" : "⏳ Unverified"}\n\n`;
+        `Status: ${
+          u.blocked
+            ? "🚫 Blocked"
+            : u.verified
+              ? "✅ Verified"
+              : "⏳ Unverified"
+        }\n\n`;
     }
   }
 
@@ -575,8 +626,11 @@ async function adminUsers(chatId, messageId) {
   );
 }
 
-async function adminChannels(chatId, messageId) {
+/* =========================
+   ADMIN CHANNELS
+========================= */
 
+async function adminChannels(chatId, messageId) {
   const r = await pool.query(`
     SELECT
       id,
@@ -584,7 +638,8 @@ async function adminChannels(chatId, messageId) {
       title,
       username,
       active,
-      required
+      required,
+      invite_link
     FROM channels
     ORDER BY id DESC
   `);
@@ -594,19 +649,30 @@ async function adminChannels(chatId, messageId) {
   if (!r.rows.length) {
     text += "No channels added.\n\n";
   } else {
-
     for (const c of r.rows) {
+      const username = String(c.username || "").trim();
+      const validUsername = /^[A-Za-z0-9_]{5,}$/.test(
+        username.replace(/^@/, "")
+      );
+
       text +=
         `<b>${escapeHtml(c.title || "Channel")}</b>\n` +
-        `ID: <code>${escapeHtml(c.channel_id)}</code>\n` +
-        `${c.username ? `Username: ${escapeHtml(c.username)}\n` : ""}` +
+        `Database ID: <code>${c.id}</code>\n` +
+        `Channel ID: <code>${escapeHtml(c.channel_id)}</code>\n` +
+        (
+          validUsername
+            ? `Username: ${escapeHtml(username)}\n`
+            : ""
+        ) +
         `Required: ${c.required ? "Yes" : "No"}\n` +
         `Status: ${c.active ? "🟢 Active" : "🔴 Off"}\n\n`;
     }
   }
 
   text +=
-    `<b>Add:</b>\n` +
+    `<b>New format:</b>\n` +
+    `<code>/adchannel CHANNEL_ID LINK</code>\n\n` +
+    `<b>Old format (also supported):</b>\n` +
     `<code>/addchannel ID | Title | Username | InviteLink</code>\n\n` +
     `<b>Remove:</b>\n` +
     `<code>/delchannel DATABASE_ID</code>`;
@@ -636,8 +702,11 @@ async function adminChannels(chatId, messageId) {
   );
 }
 
-async function adminVouchers(chatId, messageId) {
+/* =========================
+   ADMIN VOUCHERS
+========================= */
 
+async function adminVouchers(chatId, messageId) {
   const r = await pool.query(`
     SELECT
       id,
@@ -655,9 +724,7 @@ async function adminVouchers(chatId, messageId) {
   if (!r.rows.length) {
     text += "No vouchers yet.\n\n";
   } else {
-
     for (const v of r.rows) {
-
       text +=
         `<b>${escapeHtml(v.code)}</b> — ₹${Number(v.reward || 0).toFixed(2)}\n` +
         `ID: <code>${v.id}</code>\n` +
@@ -696,11 +763,13 @@ async function adminVouchers(chatId, messageId) {
   );
 }
 
-async function adminReferrals(chatId, messageId) {
+/* =========================
+   ADMIN REFERRALS
+========================= */
 
+async function adminReferrals(chatId, messageId) {
   const r = await pool.query(`
-    SELECT
-      COUNT(*)::int AS total
+    SELECT COUNT(*)::int AS total
     FROM referrals
   `);
 
@@ -734,8 +803,11 @@ Referral bonus is controlled from Settings.`,
   );
 }
 
-async function adminSettings(chatId, messageId) {
+/* =========================
+   ADMIN SETTINGS
+========================= */
 
+async function adminSettings(chatId, messageId) {
   const r = await pool.query(`
     SELECT key, value
     FROM app_settings
@@ -747,7 +819,6 @@ async function adminSettings(chatId, messageId) {
   if (!r.rows.length) {
     text += "No settings configured.\n\n";
   } else {
-
     for (const s of r.rows) {
       text +=
         `<b>${escapeHtml(s.key)}</b>: ` +
@@ -789,7 +860,6 @@ async function adminSettings(chatId, messageId) {
 }
 
 async function adminMain(chatId, messageId, admin) {
-
   return editMessage(
     chatId,
     messageId,
@@ -804,8 +874,167 @@ Select an option below.`,
   );
 }
 
-async function handleAdminCommand(message, user) {
+/* =========================
+   CHANNEL COMMAND HELPERS
+========================= */
 
+async function addChannelFromCommand(message, admin, command) {
+  if (!hasChannelPermission(admin)) {
+    await sendMessage(
+      message.chat.id,
+      "⛔ Admin access denied."
+    );
+    return;
+  }
+
+  const text = message.text || "";
+
+  const raw = text.replace(
+    /^\/(?:adchannel|addchannel)(?:@\w+)?\s*/i,
+    ""
+  ).trim();
+
+  let channelId = "";
+  let title = "";
+  let username = "";
+  let inviteLink = "";
+
+  if (command === "/addchannel") {
+    const p = raw.split("|").map(x => x.trim());
+
+    if (p.length < 4) {
+      await sendMessage(
+        message.chat.id,
+        `<b>Old format:</b>\n<code>/addchannel ID | Title | Username | InviteLink</code>\n\n<b>New format:</b>\n<code>/adchannel CHANNEL_ID LINK</code>`
+      );
+      return;
+    }
+
+    channelId = p[0];
+    title = p[1];
+    username = p[2];
+    inviteLink = p[3];
+
+    /*
+      Old records sometimes used invite tokens like
+      +06-zAvK0QNJiZmM1 in the username field.
+      Keep the invite link and avoid treating that
+      token as a public channel username.
+    */
+    const cleanedUsername = username.replace(/^@/, "");
+
+    if (!/^[A-Za-z0-9_]{5,}$/.test(cleanedUsername)) {
+      username = "";
+    } else {
+      username = cleanedUsername;
+    }
+
+    /*
+      Try fetching the actual channel title.
+      If Telegram cannot find the channel, preserve
+      the title supplied in the old command.
+    */
+    try {
+      const chat = await telegram("getChat", {
+        chat_id: channelId
+      });
+
+      if (chat.ok && chat.result) {
+        channelId = String(chat.result.id);
+        title = chat.result.title || title;
+        username = chat.result.username || username;
+      }
+    } catch (error) {
+      console.error("OLD CHANNEL LOOKUP ERROR:", error);
+    }
+  } else {
+    const match = raw.match(
+      /^(-?\d+|@[A-Za-z0-9_]+)\s+(https?:\/\/\S+)$/i
+    );
+
+    if (!match) {
+      await sendMessage(
+        message.chat.id,
+        `<b>Usage:</b>\n<code>/adchannel CHANNEL_ID LINK</code>\n\nExample:\n<code>/adchannel -1001234567890 https://t.me/mychannel</code>`
+      );
+      return;
+    }
+
+    channelId = match[1];
+    inviteLink = match[2];
+
+    const chat = await telegram("getChat", {
+      chat_id: channelId
+    });
+
+    if (!chat.ok || !chat.result) {
+      await sendMessage(
+        message.chat.id,
+        `❌ <b>Channel details could not be fetched.</b>
+
+Check the channel ID and make sure the bot has access to the channel.`
+      );
+      return;
+    }
+
+    channelId = String(chat.result.id);
+    title = chat.result.title || chat.result.username || "Channel";
+    username = chat.result.username || "";
+  }
+
+  if (!channelId || !inviteLink) {
+    await sendMessage(
+      message.chat.id,
+      "❌ Channel ID or invite link is missing."
+    );
+    return;
+  }
+
+  await pool.query(
+    `
+    INSERT INTO channels
+      (
+        channel_id,
+        title,
+        username,
+        invite_link,
+        required,
+        active
+      )
+    VALUES
+      ($1, $2, $3, $4, true, true)
+    ON CONFLICT (channel_id)
+    DO UPDATE SET
+      title = EXCLUDED.title,
+      username = EXCLUDED.username,
+      invite_link = EXCLUDED.invite_link,
+      required = true,
+      active = true
+    `,
+    [
+      String(channelId),
+      title || "Channel",
+      username || "",
+      inviteLink
+    ]
+  );
+
+  await sendMessage(
+    message.chat.id,
+    `<b>✅ Channel saved successfully!</b>
+
+📢 Name: <b>${escapeHtml(title || "Channel")}</b>
+🆔 ID: <code>${escapeHtml(channelId)}</code>
+
+🔗 Link: ${escapeHtml(inviteLink)}`
+  );
+}
+
+/* =========================
+   ADMIN COMMAND HANDLER
+========================= */
+
+async function handleAdminCommand(message, user) {
   const admin = await getAdmin(user.id);
 
   if (!admin) {
@@ -818,10 +1047,11 @@ async function handleAdminCommand(message, user) {
 
   const text = message.text || "";
   const parts = text.trim().split(/\s+/);
-  const command = parts[0].split("@")[0].toLowerCase();
+  const command = (parts[0] || "")
+    .split("@")[0]
+    .toLowerCase();
 
   if (command === "/admin") {
-
     await sendMessage(
       message.chat.id,
       `<b>👑 Admin Panel</b>
@@ -836,68 +1066,26 @@ Welcome to the bot control center.`,
   }
 
   if (
-    command === "/addchannel" &&
-    (admin.role === "owner" ||
-      admin.role === "super_admin" ||
-      admin.role === "admin")
+    command === "/adchannel" ||
+    command === "/addchannel"
   ) {
-
-    const raw = text
-      .replace(/^\/addchannel(?:@\w+)?\s*/i, "");
-
-    const p = raw.split("|").map(x => x.trim());
-
-    if (p.length < 4) {
-      await sendMessage(
-        message.chat.id,
-        `<b>Format:</b>
-
-<code>/addchannel ID | Title | Username | InviteLink</code>`
-      );
-      return;
-    }
-
-    await pool.query(
-      `
-      INSERT INTO channels
-        (
-          channel_id,
-          title,
-          username,
-          invite_link,
-          required,
-          active
-        )
-      VALUES
-        ($1, $2, $3, $4, true, true)
-      ON CONFLICT (channel_id)
-      DO UPDATE SET
-        title = EXCLUDED.title,
-        username = EXCLUDED.username,
-        invite_link = EXCLUDED.invite_link,
-        active = true
-      `,
-      [
-        p[0],
-        p[1],
-        p[2],
-        p[3]
-      ]
+    await addChannelFromCommand(
+      message,
+      admin,
+      command
     );
-
-    await sendMessage(
-      message.chat.id,
-      "✅ Channel added successfully."
-    );
-
     return;
   }
 
   if (command === "/delchannel") {
+    if (!hasChannelPermission(admin)) {
+      await sendMessage(message.chat.id, "⛔ Admin access denied.");
+      return;
+    }
 
     const id = Number(parts[1]);
 
-    if (!id) {
+    if (!Number.isInteger(id) || id <= 0) {
       await sendMessage(
         message.chat.id,
         "Usage: <code>/delchannel DATABASE_ID</code>"
@@ -905,35 +1093,37 @@ Welcome to the bot control center.`,
       return;
     }
 
-    await pool.query(
+    const result = await pool.query(
       `
       DELETE FROM channels
       WHERE id = $1
+      RETURNING id
       `,
       [id]
     );
 
     await sendMessage(
       message.chat.id,
-      "✅ Channel removed."
+      result.rows.length
+        ? "✅ Channel removed."
+        : "⚠️ Channel ID not found."
     );
 
     return;
   }
 
   if (command === "/addvoucher") {
-
-    const raw = text
-      .replace(/^\/addvoucher(?:@\w+)?\s*/i, "");
+    const raw = text.replace(
+      /^\/addvoucher(?:@\w+)?\s*/i,
+      ""
+    );
 
     const p = raw.split("|").map(x => x.trim());
 
     if (p.length < 3) {
       await sendMessage(
         message.chat.id,
-        `<b>Format:</b>
-
-<code>/addvoucher CODE | Description | Reward</code>`
+        `<b>Format:</b>\n<code>/addvoucher CODE | Description | Reward</code>`
       );
       return;
     }
@@ -951,20 +1141,11 @@ Welcome to the bot control center.`,
     await pool.query(
       `
       INSERT INTO vouchers
-        (
-          code,
-          description,
-          reward,
-          active
-        )
+        (code, description, reward, active)
       VALUES
         ($1, $2, $3, true)
       `,
-      [
-        p[0],
-        p[1],
-        reward
-      ]
+      [p[0], p[1], reward]
     );
 
     await sendMessage(
@@ -976,10 +1157,9 @@ Welcome to the bot control center.`,
   }
 
   if (command === "/disablevoucher") {
-
     const id = Number(parts[1]);
 
-    if (!id) {
+    if (!Number.isInteger(id) || id <= 0) {
       await sendMessage(
         message.chat.id,
         "Usage: <code>/disablevoucher ID</code>"
@@ -1005,10 +1185,9 @@ Welcome to the bot control center.`,
   }
 
   if (command === "/block") {
-
     const target = parts[1];
 
-    if (!target) {
+    if (!target || !/^\d+$/.test(target)) {
       await sendMessage(
         message.chat.id,
         "Usage: <code>/block TELEGRAM_ID</code>"
@@ -1035,10 +1214,9 @@ Welcome to the bot control center.`,
   }
 
   if (command === "/unblock") {
-
     const target = parts[1];
 
-    if (!target) {
+    if (!target || !/^\d+$/.test(target)) {
       await sendMessage(
         message.chat.id,
         "Usage: <code>/unblock TELEGRAM_ID</code>"
@@ -1065,18 +1243,17 @@ Welcome to the bot control center.`,
   }
 
   if (command === "/setsetting") {
-
-    const raw = text
-      .replace(/^\/setsetting(?:@\w+)?\s*/i, "");
+    const raw = text.replace(
+      /^\/setsetting(?:@\w+)?\s*/i,
+      ""
+    );
 
     const p = raw.split("|").map(x => x.trim());
 
-    if (p.length < 2) {
+    if (p.length < 2 || !p[0]) {
       await sendMessage(
         message.chat.id,
-        `<b>Format:</b>
-
-<code>/setsetting KEY | VALUE</code>`
+        `<b>Format:</b>\n<code>/setsetting KEY | VALUE</code>`
       );
       return;
     }
@@ -1086,7 +1263,7 @@ Welcome to the bot control center.`,
       INSERT INTO app_settings
         (key, value, updated_at)
       VALUES
-        ($1, $2)
+        ($1, $2, NOW())
       ON CONFLICT (key)
       DO UPDATE SET
         value = EXCLUDED.value,
@@ -1107,20 +1284,100 @@ Welcome to the bot control center.`,
   }
 
   if (command === "/id") {
+    await sendMessage(
+      message.chat.id,
+      `<b>Telegram ID</b>\n\n<code>${user.id}</code>`
+    );
+    return;
+  }
+
+  if (command === "/addadmin") {
+    if (!isOwnerRole(admin)) {
+      await sendMessage(
+        message.chat.id,
+        "⛔ Owner access required."
+      );
+      return;
+    }
+
+    const target = parts[1];
+
+    if (!target || !/^\d+$/.test(target)) {
+      await sendMessage(
+        message.chat.id,
+        "Usage: <code>/addadmin TELEGRAM_ID</code>"
+      );
+      return;
+    }
+
+    await pool.query(
+      `
+      INSERT INTO admins (telegram_id, role)
+      VALUES ($1, 'admin')
+      ON CONFLICT (telegram_id)
+      DO UPDATE SET role = 'admin'
+      `,
+      [String(target)]
+    );
 
     await sendMessage(
       message.chat.id,
-      `<b>Telegram ID</b>
+      `✅ Admin added: <code>${target}</code>`
+    );
 
-<code>${user.id}</code>`
+    return;
+  }
+
+  if (command === "/removeadmin") {
+    if (!isOwnerRole(admin)) {
+      await sendMessage(
+        message.chat.id,
+        "⛔ Owner access required."
+      );
+      return;
+    }
+
+    const target = parts[1];
+
+    if (!target || !/^\d+$/.test(target)) {
+      await sendMessage(
+        message.chat.id,
+        "Usage: <code>/removeadmin TELEGRAM_ID</code>"
+      );
+      return;
+    }
+
+    if (String(target) === String(process.env.OWNER_ID)) {
+      await sendMessage(
+        message.chat.id,
+        "❌ The configured owner cannot be removed here."
+      );
+      return;
+    }
+
+    await pool.query(
+      `
+      DELETE FROM admins
+      WHERE telegram_id = $1
+        AND role NOT IN ('owner', 'super_admin')
+      `,
+      [String(target)]
+    );
+
+    await sendMessage(
+      message.chat.id,
+      "✅ Admin removal request processed."
     );
 
     return;
   }
 }
 
-module.exports = async (req, res) => {
+/* =========================
+   WEBHOOK ENTRY
+========================= */
 
+module.exports = async (req, res) => {
   if (req.method !== "POST") {
     return reply(res, {
       ok: true,
@@ -1129,7 +1386,6 @@ module.exports = async (req, res) => {
   }
 
   try {
-
     if (!BOT_TOKEN) {
       return reply(res, {
         ok: false,
@@ -1144,19 +1400,18 @@ module.exports = async (req, res) => {
       });
     }
 
-    await ensureOwner();
-
     const update =
       typeof req.body === "string"
         ? JSON.parse(req.body || "{}")
         : (req.body || {});
+
+    await ensureOwner();
 
     /* =========================
        CALLBACK QUERY
     ========================= */
 
     if (update.callback_query) {
-
       const call = update.callback_query;
       const user = call.from;
       const data = call.data || "";
@@ -1165,11 +1420,9 @@ module.exports = async (req, res) => {
       await saveUser(user);
 
       if (data === "check_join") {
-
         const check = await checkAllChannels(user.id);
 
         if (!check.allJoined) {
-
           await answerCallback(
             call.id,
             "❌ Please join all required channels first."
@@ -1182,10 +1435,9 @@ module.exports = async (req, res) => {
 
 You still have ${check.notJoined.length} required channel(s) left to join.
 
-Join them and tap <b>Check Joined</b>.`,
+Join them and tap <b>Request Check</b>.`,
             {
-              reply_markup:
-                joinKeyboard(check.notJoined)
+              reply_markup: joinKeyboard(check.notJoined)
             }
           );
 
@@ -1216,8 +1468,7 @@ Join them and tap <b>Check Joined</b>.`,
 
 Your dashboard is ready.`,
           {
-            reply_markup:
-              dashboardKeyboard()
+            reply_markup: dashboardKeyboard()
           }
         );
 
@@ -1225,7 +1476,6 @@ Your dashboard is ready.`,
       }
 
       if (data.startsWith("admin_")) {
-
         const admin = await getAdmin(user.id);
 
         if (!admin) {
@@ -1245,79 +1495,62 @@ Your dashboard is ready.`,
             message.message_id,
             admin
           );
-        }
-
-        else if (data === "admin_dashboard") {
+        } else if (data === "admin_dashboard") {
           await adminDashboard(
             message.chat.id,
             message.message_id
           );
-        }
-
-        else if (data === "admin_users") {
+        } else if (data === "admin_users") {
           await adminUsers(
             message.chat.id,
             message.message_id
           );
-        }
-
-        else if (data === "admin_channels") {
+        } else if (data === "admin_channels") {
           await adminChannels(
             message.chat.id,
             message.message_id
           );
-        }
-
-        else if (data === "admin_vouchers") {
+        } else if (data === "admin_vouchers") {
           await adminVouchers(
             message.chat.id,
             message.message_id
           );
-        }
-
-        else if (data === "admin_referrals") {
+        } else if (data === "admin_referrals") {
           await adminReferrals(
             message.chat.id,
             message.message_id
           );
-        }
-
-        else if (data === "admin_settings") {
+        } else if (data === "admin_settings") {
           await adminSettings(
             message.chat.id,
             message.message_id
           );
-        }
-
-        else if (data === "admin_admins") {
-
-          if (
-            admin.role !== "owner" &&
-            admin.role !== "super_admin"
-          ) {
+        } else if (data === "admin_admins") {
+          if (!isOwnerRole(admin)) {
             await sendMessage(
               message.chat.id,
               "⛔ Owner access required."
             );
           } else {
-
             const admins = await pool.query(`
               SELECT telegram_id, role
               FROM admins
               ORDER BY id ASC
             `);
 
-            let text =
-              `<b>👑 Administrators</b>\n\n`;
+            let text = `<b>👑 Administrators</b>\n\n`;
 
             for (const a of admins.rows) {
               text +=
-                `• <code>${a.telegram_id}</code> — ${escapeHtml(a.role)}\n`;
+                `• <code>${escapeHtml(a.telegram_id)}</code> — ` +
+                `${escapeHtml(a.role)}\n`;
             }
 
             text +=
-              `\nAdd admin:\n` +
-              `<code>/addadmin TELEGRAM_ID</code>`;
+              `\n<b>Add admin:</b>\n` +
+              `<code>/addadmin TELEGRAM_ID</code>\n\n` +
+              `<b>Remove admin:</b>\n` +
+              `<code>/removeadmin TELEGRAM_ID</code>`;
 
             await editMessage(
               message.chat.id,
@@ -1350,7 +1583,6 @@ Your dashboard is ready.`,
     ========================= */
 
     if (update.message) {
-
       const message = update.message;
       const user = message.from;
 
@@ -1362,28 +1594,17 @@ Your dashboard is ready.`,
 
       const text = message.text || "";
 
-      if (
-        text.startsWith("/start")
-      ) {
+      if (text.startsWith("/start")) {
+        const startParts = text.trim().split(/\s+/);
+        const payload = startParts[1] || "";
 
-        const startParts =
-          text.trim().split(/\s+/);
-
-        const payload =
-          startParts[1] || "";
-
-        if (
-          payload.startsWith("ref_")
-        ) {
-
-          const refTelegramId =
-            payload.substring(4);
+        if (payload.startsWith("ref_")) {
+          const refTelegramId = payload.substring(4);
 
           if (
             /^\d+$/.test(refTelegramId) &&
             String(refTelegramId) !== String(user.id)
           ) {
-
             const referrer = await pool.query(
               `
               SELECT id
@@ -1395,7 +1616,6 @@ Your dashboard is ready.`,
             );
 
             if (referrer.rows.length) {
-
               await pool.query(
                 `
                 UPDATE users
@@ -1433,7 +1653,6 @@ Your dashboard is ready.`,
       }
 
       if (text === "/id") {
-
         await sendMessage(
           message.chat.id,
           `<b>Your Telegram ID:</b>\n\n<code>${user.id}</code>`
@@ -1455,7 +1674,6 @@ Use /start to open the bot.`
     return reply(res, { ok: true });
 
   } catch (error) {
-
     console.error("BOT WEBHOOK ERROR:", error);
 
     return reply(res, {
@@ -1463,4 +1681,4 @@ Use /start to open the bot.`
       error: "Webhook processing failed"
     });
   }
-};
+}; a
