@@ -1,3 +1,4 @@
+
 const { Pool } = require("pg");
 
 const pool = new Pool({
@@ -25,7 +26,6 @@ async function telegram(method, params = {}) {
 }
 
 module.exports = async (req, res) => {
-
   if (req.method !== "GET" && req.method !== "POST") {
     return json(res, 405, {
       ok: false,
@@ -34,7 +34,6 @@ module.exports = async (req, res) => {
   }
 
   try {
-
     if (!process.env.BOT_TOKEN) {
       return json(res, 500, {
         ok: false,
@@ -149,6 +148,22 @@ module.exports = async (req, res) => {
     `);
 
     await pool.query(`
+      CREATE TABLE IF NOT EXISTS referral_claims (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        referrals_used INTEGER NOT NULL DEFAULT 5,
+        voucher_id INTEGER REFERENCES vouchers(id),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS
+        idx_referral_claims_user_id
+      ON referral_claims(user_id)
+    `);
+
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS app_settings (
         id SERIAL PRIMARY KEY,
         key TEXT UNIQUE NOT NULL,
@@ -195,15 +210,10 @@ module.exports = async (req, res) => {
         bot_link = EXCLUDED.bot_link,
         updated_at = NOW()
       `,
-      [
-        botUsername,
-        botName,
-        botLink
-      ]
+      [botUsername, botName, botLink]
     );
 
     if (process.env.OWNER_ID) {
-
       await pool.query(
         `
         INSERT INTO admins
@@ -232,20 +242,16 @@ module.exports = async (req, res) => {
       .replace(/^https?:\/\//, "")
       .replace(/\/+$/, "");
 
-    const webhookUrl =
-      `https://${cleanBase}/api/bot`;
+    const webhookUrl = `https://${cleanBase}/api/bot`;
 
-    const webhook = await telegram(
-      "setWebhook",
-      {
-        url: webhookUrl,
-        allowed_updates: [
-          "message",
-          "callback_query"
-        ],
-        drop_pending_updates: false
-      }
-    );
+    const webhook = await telegram("setWebhook", {
+      url: webhookUrl,
+      allowed_updates: [
+        "message",
+        "callback_query"
+      ],
+      drop_pending_updates: false
+    });
 
     if (!webhook.ok) {
       return json(res, 500, {
@@ -264,11 +270,11 @@ module.exports = async (req, res) => {
         link: botLink
       },
       webhook: webhookUrl,
-      owner_configured: Boolean(process.env.OWNER_ID)
+      owner_configured: Boolean(process.env.OWNER_ID),
+      referral_claims_table: "ready"
     });
 
   } catch (error) {
-
     console.error("SETUP ERROR:", error);
 
     return json(res, 500, {
