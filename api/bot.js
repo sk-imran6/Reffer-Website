@@ -1681,4 +1681,4 @@ Use /start to open the bot.`
       error: "Webhook processing failed"
     });
   }
-}; a
+}; 
